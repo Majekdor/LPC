@@ -1,45 +1,61 @@
 package me.oncode9.lpc;
 
+import dev.majek.chattools.MiniMessageWrapper;
 import me.clip.placeholderapi.PlaceholderAPI;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.TextColor;
+import net.kyori.adventure.text.minimessage.placeholder.Placeholder;
+import net.kyori.adventure.text.minimessage.placeholder.PlaceholderResolver;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import net.luckperms.api.LuckPerms;
 import net.luckperms.api.cacheddata.CachedMetaData;
 import net.luckperms.api.model.group.Group;
 import net.luckperms.api.model.user.User;
 import org.apache.commons.lang.Validate;
-import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
-import org.bukkit.event.Listener;
-import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
-public final class LPCPlugin extends JavaPlugin implements Listener {
+public final class LPCPlugin extends JavaPlugin {
 
-	@Override
-	public void onEnable() {
-		saveDefaultConfig();
+	private static LPCPlugin core;
 
-		if (isPlaceholderAPIEnabled())
-			getLogger().info("Hooked into PlaceholderAPI.");
+	public LPCPlugin() {
+		core = this;
+	}
 
-		getServer().getPluginManager().registerEvents(this, this);
+	public static LPCPlugin core() {
+		return core;
 	}
 
 	@Override
-	public boolean onCommand(final @NotNull CommandSender sender, final @NotNull Command command, final @NotNull String label, final String[] args) {
+	public void onEnable() {
+		this.saveDefaultConfig();
+
+		if (this.isPlaceholderAPIEnabled())
+			getLogger().info("Hooked into PlaceholderAPI.");
+
+		if (this.isPaperServer()) {
+			this.getServer().getPluginManager().registerEvents(new PaperServer(), this);
+		} else {
+			this.getServer().getPluginManager().registerEvents(new SpigotServer(), this);
+		}
+	}
+
+	@Override
+	public boolean onCommand(final @NotNull CommandSender sender, final @NotNull Command command,
+													 final @NotNull String label, final String[] args) {
 		if (args.length == 1 && args[0].equalsIgnoreCase("reload")) {
 			reloadConfig();
 
-			sender.sendMessage(colorize("&aThe configuration file has been reloaded."));
+			sender.sendMessage("The configuration file has been reloaded.");
 			return true;
 		}
 
@@ -47,76 +63,92 @@ public final class LPCPlugin extends JavaPlugin implements Listener {
 	}
 
 	@Override
-	public List<String> onTabComplete(final @NotNull CommandSender sender, final @NotNull Command command, final @NotNull String alias, final String[] args) {
+	public List<String> onTabComplete(final @NotNull CommandSender sender, final @NotNull Command command,
+																		final @NotNull String alias, final String[] args) {
 		if (args.length == 1)
 			return Collections.singletonList("reload");
 
 		return new ArrayList<>();
 	}
 
-	@EventHandler(priority = EventPriority.HIGHEST)
-	public void onChat(final AsyncPlayerChatEvent event) {
-		final Player player = event.getPlayer();
-		final String group = loadUser(player).getPrimaryGroup();
-		final String message = event.getMessage();
+	/**
+	 * Instance of the {@link LegacyComponentSerializer} used by server implementations.
+	 */
+	public static final LegacyComponentSerializer LEGACY_COMPONENT_SERIALIZER = LegacyComponentSerializer.builder()
+			.hexColors().useUnusualXRepeatedCharacterHexFormat().character('§').build();
 
-		String format = Objects.requireNonNull(getConfig().getString(getConfig().getString("group-formats." + group) != null ? "group-formats." + group : "chat-format"))
-				.replace("{world}", player.getWorld().getName())
-				.replace("{prefix}", getPrefix(player))
-				.replace("{prefixes}", getPrefixes(player))
-				.replace("{name}", player.getName())
-				.replace("{suffix}", getSuffix(player))
-				.replace("{suffixes}", getSuffixes(player))
-				.replace("{username-color}", playerMeta(player).getMetaValue("username-color") != null
-						? playerMeta(player).getMetaValue("username-color") : groupMeta(group).getMetaValue("username-color") != null
-						? groupMeta(group).getMetaValue("username-color") : "")
-				.replace("{message-color}", playerMeta(player).getMetaValue("message-color") != null
-						? playerMeta(player).getMetaValue("message-color") : groupMeta(group).getMetaValue("message-color") != null
-						? groupMeta(group).getMetaValue("message-color") : "");
+	/**
+	 * Format the chat for all server implementations.
+	 *
+	 * @param source the chatter
+	 * @param message the message
+	 * @return formatted chat
+	 */
+	@SuppressWarnings("deprecation")
+	public @NotNull Component formatChat(final @NotNull Player source, final @NotNull String message) {
+		final FileConfiguration config = LPCPlugin.core().getConfig();
+		final String group = loadUser(source).getPrimaryGroup();
 
-		format = translateHexColorCodes(colorize(isPlaceholderAPIEnabled() ? PlaceholderAPI.setPlaceholders(player, format) : format));
+		String format = config.getString(
+				config.getString("group-formats." + group) != null ? "group-formats." + group : "chat-format",
+				"<prefix> <name><white>: <message>"
+		).replace("<world>", source.getWorld().getName());
 
-		event.setFormat(format.replace("{message}", player.hasPermission("lpc.colorcodes") && player.hasPermission("lpc.rgbcodes")
-				? translateHexColorCodes(colorize(message)) : player.hasPermission("lpc.colorcodes") ? colorize(message) : player.hasPermission("lpc.rgbcodes")
-				? translateHexColorCodes(message) : message).replace("%", "%%"));
-	}
+		final MiniMessageWrapper legacyWrapper = MiniMessageWrapper.legacy();
+		final MiniMessageWrapper playerWrapper = MiniMessageWrapper.builder()
+				.gradients(source.hasPermission("lpc.gradients"))
+				.hexColors(source.hasPermission("lpc.rgbcodes"))
+				.legacyColors(source.hasPermission("lpc.colorcodes"))
+				.standardColors(source.hasPermission("lpc.colorcodes"))
+				.build();
 
-	private String colorize(final String message) {
-		return ChatColor.translateAlternateColorCodes('&', message);
-	}
+		final PlaceholderResolver.Builder placeholderBuilder = PlaceholderResolver.builder().placeholders(
+				Placeholder.component("<prefix>", legacyWrapper.mmParse(getPrefix(source))),
+				Placeholder.component("<prefixes>", legacyWrapper.mmParse(getPrefixes(source))),
+				Placeholder.component("<suffix>", legacyWrapper.mmParse(getSuffix(source))),
+				Placeholder.component("<suffixes>", legacyWrapper.mmParse(getSuffixes(source))),
+				Placeholder.component("<message>", playerWrapper.mmParse(message).style(builder -> {
+					String messageColor = playerMeta(source).getMetaValue("message-color") == null
+							? groupMeta(group).getMetaValue("message-color")
+							: playerMeta(source).getMetaValue("message-color");
+					if (messageColor != null) {
+						builder.color(getColor(messageColor));
+					}
+				})),
+				Placeholder.component("<name>", Component.text(source.getName()).style(builder -> {
+					String usernameColor = playerMeta(source).getMetaValue("username-color") == null
+							? groupMeta(group).getMetaValue("username-color")
+							: playerMeta(source).getMetaValue("username-color");
+					if (usernameColor != null) {
+						builder.color(getColor(usernameColor));
+					}
+				}))
+		);
 
-	private String translateHexColorCodes(final String message) {
-		final Pattern hexPattern = Pattern.compile("&#([A-Fa-f0-9]{6})");
-		final char colorChar = ChatColor.COLOR_CHAR;
-
-		final Matcher matcher = hexPattern.matcher(message);
-		final StringBuffer buffer = new StringBuffer(message.length() + 4 * 8);
-
-		while (matcher.find()) {
-			final String group = matcher.group(1);
-
-			matcher.appendReplacement(buffer, colorChar + "x"
-					+ colorChar + group.charAt(0) + colorChar + group.charAt(1)
-					+ colorChar + group.charAt(2) + colorChar + group.charAt(3)
-					+ colorChar + group.charAt(4) + colorChar + group.charAt(5));
+		if (this.isPaperServer()) {
+			placeholderBuilder.placeholder(Placeholder.component("<displayname>", source.displayName()));
+		} else {
+			placeholderBuilder.placeholder(Placeholder.component("<displayname>",
+					LEGACY_COMPONENT_SERIALIZER.deserialize(source.getDisplayName())));
 		}
 
-		return matcher.appendTail(buffer).toString();
+		return MiniMessageWrapper.builder().legacyColors(true).placeholderResolver(placeholderBuilder.build()).build()
+				.mmParse(LPCPlugin.core().isPlaceholderAPIEnabled() ? PlaceholderAPI.setPlaceholders(source, format) : format);
 	}
 
-	private String getPrefix(final Player player) {
+	private @NotNull String getPrefix(final Player player) {
 		final String prefix = playerMeta(player).getPrefix();
 
 		return prefix != null ? prefix : "";
 	}
 
-	private String getSuffix(final Player player) {
+	private @NotNull String getSuffix(final Player player) {
 		final String suffix = playerMeta(player).getSuffix();
 
 		return suffix != null ? suffix : "";
 	}
 
-	private String getPrefixes(final Player player) {
+	private @NotNull String getPrefixes(final Player player) {
 		final SortedMap<Integer, String> map = playerMeta(player).getPrefixes();
 		final StringBuilder prefixes = new StringBuilder();
 
@@ -126,7 +158,7 @@ public final class LPCPlugin extends JavaPlugin implements Listener {
 		return prefixes.toString();
 	}
 
-	private String getSuffixes(final Player player) {
+	private @NotNull String getSuffixes(final Player player) {
 		final SortedMap<Integer, String> map = playerMeta(player).getSuffixes();
 		final StringBuilder suffixes = new StringBuilder();
 
@@ -136,15 +168,15 @@ public final class LPCPlugin extends JavaPlugin implements Listener {
 		return suffixes.toString();
 	}
 
-	private CachedMetaData playerMeta(final Player player) {
+	private @NotNull CachedMetaData playerMeta(final Player player) {
 		return loadUser(player).getCachedData().getMetaData(getApi().getContextManager().getQueryOptions(player));
 	}
 
-	private CachedMetaData groupMeta(final String group) {
+	private @NotNull CachedMetaData groupMeta(final String group) {
 		return loadGroup(group).getCachedData().getMetaData(getApi().getContextManager().getStaticQueryOptions());
 	}
 
-	private User loadUser(final Player player) {
+	private User loadUser(final @NotNull Player player) {
 		if (!player.isOnline())
 			throw new IllegalStateException("Player is offline!");
 
@@ -155,13 +187,27 @@ public final class LPCPlugin extends JavaPlugin implements Listener {
 		return getApi().getGroupManager().getGroup(group);
 	}
 
-	private LuckPerms getApi() {
-		final RegisteredServiceProvider<LuckPerms> provider = getServer().getServicesManager().getRegistration(LuckPerms.class);
+	private @NotNull LuckPerms getApi() {
+		final RegisteredServiceProvider<LuckPerms> provider = this.getServer()
+				.getServicesManager().getRegistration(LuckPerms.class);
 		Validate.notNull(provider);
 		return provider.getProvider();
 	}
 
+	private @Nullable TextColor getColor(final @NotNull String color) {
+		return MiniMessageWrapper.legacy().mmParse(color).color();
+	}
+
 	private boolean isPlaceholderAPIEnabled() {
 		return getServer().getPluginManager().isPluginEnabled("PlaceholderAPI");
+	}
+
+	private boolean isPaperServer() {
+		try {
+			Class.forName("io.papermc.paper.event.player.AsyncChatEvent");
+			return true;
+		} catch (final ClassNotFoundException ignored) {
+			return false;
+		}
 	}
 }
