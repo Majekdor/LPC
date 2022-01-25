@@ -103,11 +103,11 @@ public final class LPCPlugin extends JavaPlugin {
 				.build();
 
 		final PlaceholderResolver.Builder placeholderBuilder = PlaceholderResolver.builder().placeholders(
-				Placeholder.component("<prefix>", legacyWrapper.mmParse(getPrefix(source))),
-				Placeholder.component("<prefixes>", legacyWrapper.mmParse(getPrefixes(source))),
-				Placeholder.component("<suffix>", legacyWrapper.mmParse(getSuffix(source))),
-				Placeholder.component("<suffixes>", legacyWrapper.mmParse(getSuffixes(source))),
-				Placeholder.component("<message>", playerWrapper.mmParse(message).style(builder -> {
+				Placeholder.component("prefix", legacyWrapper.mmParse(getPrefix(source))),
+				Placeholder.component("prefixes", legacyWrapper.mmParse(getPrefixes(source))),
+				Placeholder.component("suffix", legacyWrapper.mmParse(getSuffix(source))),
+				Placeholder.component("suffixes", legacyWrapper.mmParse(getSuffixes(source))),
+				Placeholder.component("message", playerWrapper.mmParse(message).style(builder -> {
 					String messageColor = playerMeta(source).getMetaValue("message-color") == null
 							? groupMeta(group).getMetaValue("message-color")
 							: playerMeta(source).getMetaValue("message-color");
@@ -115,7 +115,7 @@ public final class LPCPlugin extends JavaPlugin {
 						builder.color(getColor(messageColor));
 					}
 				})),
-				Placeholder.component("<name>", Component.text(source.getName()).style(builder -> {
+				Placeholder.component("name", Component.text(source.getName()).style(builder -> {
 					String usernameColor = playerMeta(source).getMetaValue("username-color") == null
 							? groupMeta(group).getMetaValue("username-color")
 							: playerMeta(source).getMetaValue("username-color");
@@ -126,9 +126,9 @@ public final class LPCPlugin extends JavaPlugin {
 		);
 
 		if (this.isPaperServer()) {
-			placeholderBuilder.placeholder(Placeholder.component("<displayname>", source.displayName()));
+			placeholderBuilder.placeholder(Placeholder.component("displayname", source.displayName()));
 		} else {
-			placeholderBuilder.placeholder(Placeholder.component("<displayname>",
+			placeholderBuilder.placeholder(Placeholder.component("displayname",
 					LEGACY_COMPONENT_SERIALIZER.deserialize(source.getDisplayName())));
 		}
 
